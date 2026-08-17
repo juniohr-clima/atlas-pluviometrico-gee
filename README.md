@@ -4,6 +4,8 @@ Prompts e scripts para geração de produtos climatológicos de precipitação n
 
 Este repositório disponibiliza prompts, scripts e documentação para geração de produtos climatológicos de precipitação utilizando o Google Earth Engine. A proposta permite automatizar a obtenção, processamento, análise estatística e representação espacial de dados de diferentes bases climáticas.
 
+Primeira versão pública do conjunto de prompts e scripts para geração de produtos climatológicos de precipitação no Google Earth Engine utilizando CHIRPS.
+
 ## Produtos ##
 precipitação média mensal — janeiro a dezembro;
 precipitação média anual;
