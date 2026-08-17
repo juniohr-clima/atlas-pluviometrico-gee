@@ -1,0 +1,734 @@
+// ============================================================================
+// ATLAS PLUVIOMÉTRICO - Lindberg Nascimento Júnior
+// Google Earth Engine - CHIRPS Daily
+// ============================================================================
+
+// ============================================================================
+// 1. CONFIGURAÇÕES
+// ============================================================================
+
+var roi = table.geometry();
+
+var anoInicial = 1991;
+var anoFinal = 2025;
+
+var escala = 5566;
+
+var pasta = 'Atlas_Pluviometrico';
+
+var dataInicial = ee.Date.fromYMD(anoInicial, 1, 1);
+var dataFinal = ee.Date.fromYMD(anoFinal + 1, 1, 1);
+
+var numeroAnos = anoFinal - anoInicial + 1;
+
+var anos = ee.List.sequence(anoInicial, anoFinal);
+
+var meses = ee.List.sequence(1, 12);
+
+var nomesMeses = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro'
+];
+
+
+// ============================================================================
+// 2. PALETA
+// ============================================================================
+
+var paletaAtlas = [
+  '#A50026',
+  '#D73027',
+  '#F46D43',
+  '#FDAE61',
+  '#FEE08B',
+  '#FFFFBF',
+  '#D9EF8B',
+  '#A6D96A',
+  '#66BD63',
+  '#1A9850',
+  '#66C2A5',
+  '#3288BD',
+  '#5E4FA2'
+];
+
+
+// ============================================================================
+// 3. MAPA
+// ============================================================================
+
+Map.centerObject(roi, 7);
+
+Map.addLayer(
+  table.style({
+    color: '000000',
+    fillColor: '00000000',
+    width: 2
+  }),
+  {},
+  'Área de estudo'
+);
+
+
+// ============================================================================
+// 4. CHIRPS DAILY
+// ============================================================================
+
+var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+  .filterBounds(roi)
+  .filterDate(dataInicial, dataFinal)
+  .select('precipitation');
+
+print('Número de imagens CHIRPS:', chirps.size());
+
+
+// ============================================================================
+// 5. PRECIPITAÇÃO ANUAL
+// ============================================================================
+
+var precipitacaoAnual = ee.ImageCollection.fromImages(
+  anos.map(function(ano) {
+
+    ano = ee.Number(ano);
+
+    var inicio = ee.Date.fromYMD(ano, 1, 1);
+    var fim = inicio.advance(1, 'year');
+
+    return chirps
+      .filterDate(inicio, fim)
+      .sum()
+      .rename('precipitacao')
+      .set('ano', ano);
+
+  })
+);
+
+
+// ============================================================================
+// 6. PRECIPITAÇÃO TOTAL MÉDIA ANUAL
+// ============================================================================
+
+var precipitacaoTotalMediaAnual = precipitacaoAnual
+  .mean()
+  .rename('Precipitacao_Total_Media_Anual')
+  .clip(roi);
+
+var visAnual = {
+  min: 500,
+  max: 3000,
+  palette: paletaAtlas
+};
+
+Map.addLayer(
+  precipitacaoTotalMediaAnual,
+  visAnual,
+  '01 - Precipitação total média anual'
+);
+
+
+// ============================================================================
+// 7.REGIME PLUVIOMÉTRICO
+// ============================================================================
+
+var RegimeMensal = ee.ImageCollection.fromImages(
+  meses.map(function(mes) {
+
+    mes = ee.Number(mes);
+
+    var acumuladosMensais = ee.ImageCollection.fromImages(
+      anos.map(function(ano) {
+
+        ano = ee.Number(ano);
+
+        var inicio = ee.Date.fromYMD(ano, mes, 1);
+        var fim = inicio.advance(1, 'month');
+
+        return chirps
+          .filterDate(inicio, fim)
+          .sum()
+          .rename('precipitacao');
+
+      })
+    );
+
+    return acumuladosMensais
+      .mean()
+      .rename('Precipitacao_Mensal')
+      .set('mes', mes);
+
+  })
+);
+
+print('Regime pluviométrico:', RegimeMensal);
+
+
+// ============================================================================
+// 8. MAPAS MENSAIS
+// ============================================================================
+
+var visMensal = {
+  min: 0,
+  max: 400,
+  palette: paletaAtlas
+};
+
+for (var i = 1; i <= 12; i++) {
+
+  var imagemMes = ee.Image(
+    RegimeMensal
+      .filter(ee.Filter.eq('mes', i))
+      .first()
+  ).clip(roi);
+
+  Map.addLayer(
+    imagemMes,
+    visMensal,
+    '02 - ' + nomesMeses[i - 1],
+    false
+  );
+
+}
+
+
+// ============================================================================
+// 9. DESVIO PADRÃO ANUAL
+// ============================================================================
+
+var desvioPadraoAnual = precipitacaoAnual
+  .reduce(ee.Reducer.stdDev())
+  .rename('Desvio_Padrao_Anual')
+  .clip(roi);
+
+var visDesvioPadrao = {
+  min: 0,
+  max: 500,
+  palette: paletaAtlas
+};
+
+Map.addLayer(
+  desvioPadraoAnual,
+  visDesvioPadrao,
+  '03 - Desvio padrão anual',
+  false
+);
+
+// ============================================================================
+// 10. COEFICIENTE DE VARIAÇÃO
+// ============================================================================
+
+var mediaAnual = precipitacaoAnual.mean();
+
+var desvioAnual = precipitacaoAnual.reduce(
+  ee.Reducer.stdDev()
+);
+
+var coeficienteVariacao = desvioAnual
+  .divide(mediaAnual)
+  .multiply(100)
+  .rename('Coeficiente_Variacao')
+  .updateMask(mediaAnual.gt(0))
+  .clip(roi);
+
+var visCV = {
+  min: 0,
+  max: 50,
+  palette: paletaAtlas
+};
+
+Map.addLayer(
+  coeficienteVariacao,
+  visCV,
+  '04 - Coeficiente de Variação (%)',
+  false
+);
+
+
+// ============================================================================
+// 11. PERCENTIL 95
+// ============================================================================
+
+var P95 = chirps
+  .reduce(ee.Reducer.percentile([95]))
+  .rename('P95')
+  .clip(roi);
+
+var visP95 = {
+  min: 0,
+  max: 50,
+  palette: paletaAtlas
+};
+
+Map.addLayer(
+  P95,
+  visP95,
+  '05 - Percentil 95 (P95)',
+  false
+);
+
+
+// ============================================================================
+// 12. PERCENTIL 99
+// ============================================================================
+
+var P99 = chirps
+  .reduce(ee.Reducer.percentile([99]))
+  .rename('P99')
+  .clip(roi);
+
+var visP99 = {
+  min: 0,
+  max: 80,
+  palette: paletaAtlas
+};
+
+Map.addLayer(
+  P99,
+  visP99,
+  '06 - Percentil 99 (P99)',
+  false
+);
+
+
+// ============================================================================
+// 13. NÚMERO MÉDIO ANUAL DE DIAS COM PRECIPITAÇÃO
+// ============================================================================
+//
+// IMPORTANTE:
+//
+// Não representa precipitação acumulada.
+//
+// Cada imagem diária é transformada em:
+//
+// 1 = precipitação atingiu o limiar
+// 0 = precipitação não atingiu o limiar
+//
+// Em seguida:
+// soma todos os dias da série
+// divide pelo número de anos
+//
+// Resultado: número médio de dias/ano.
+// ============================================================================
+
+var limiaresChuva = [
+  1,
+  5,
+  10,
+  15,
+  20,
+  25,
+  30,
+  35,
+  40,
+  45,
+  50
+];
+
+var visDiasChuva = {
+  min: 0,
+  max: 150,
+  palette: paletaAtlas
+};
+
+
+// -----------------------------------------------------------------------------
+// FUNÇÃO PARA CALCULAR DIAS ≥ LIMIAR
+// -----------------------------------------------------------------------------
+
+function calcularDiasChuva(limiar) {
+
+  var dias = chirps.map(function(imagem) {
+
+    return imagem
+      .gte(limiar)
+      .rename('dias');
+
+  });
+
+  return dias
+    .sum()
+    .divide(numeroAnos)
+    .rename('Dias_Chuva_GE_' + limiar + 'mm')
+    .clip(roi);
+
+}
+
+
+// -----------------------------------------------------------------------------
+// MAPAS PARA ≥ 1 ATÉ ≥ 50 mm
+// -----------------------------------------------------------------------------
+
+var imagensDiasChuva = [];
+
+for (var d = 0; d < limiaresChuva.length; d++) {
+
+  var limiar = limiaresChuva[d];
+
+  var imagemDias = calcularDiasChuva(limiar);
+
+  imagensDiasChuva.push(imagemDias);
+
+  Map.addLayer(
+    imagemDias,
+    visDiasChuva,
+    '07 - Dias com chuva ≥ ' + limiar + ' mm',
+    false
+  );
+
+}
+
+
+// -----------------------------------------------------------------------------
+// DIAS COM PRECIPITAÇÃO > 50 mm
+// -----------------------------------------------------------------------------
+
+var diasChuvaMais50 = chirps
+  .map(function(imagem) {
+
+    return imagem
+      .gt(50)
+      .rename('dias');
+
+  })
+  .sum()
+  .divide(numeroAnos)
+  .rename('Dias_Chuva_Maior_50mm')
+  .clip(roi);
+
+Map.addLayer(
+  diasChuvaMais50,
+  visDiasChuva,
+  '07 - Dias com chuva > 50 mm',
+  false
+);
+
+
+// ============================================================================
+// 14. FUNÇÃO DE EXPORTAÇÃO
+// ============================================================================
+
+function exportar(imagem, nome) {
+
+  Export.image.toDrive({
+
+    image: imagem,
+
+    description: nome,
+
+    folder: pasta,
+
+    fileNamePrefix: nome,
+
+    region: roi,
+
+    scale: escala,
+
+    maxPixels: 1e13
+
+  });
+
+}
+
+
+// ============================================================================
+// 15. EXPORTAR PRODUTOS PRINCIPAIS
+// ============================================================================
+
+exportar(
+  precipitacaoTotalMediaAnual,
+  '01_Precipitacao_Total_Media_Anual_' +
+  anoInicial + '_' + anoFinal
+);
+
+exportar(
+  desvioPadraoAnual,
+  '03_Desvio_Padrao_Anual_' +
+  anoInicial + '_' + anoFinal
+);
+
+exportar(
+  coeficienteVariacao,
+  '04_Coeficiente_Variacao_' +
+  anoInicial + '_' + anoFinal
+);
+
+exportar(
+  P95,
+  '05_P95_' +
+  anoInicial + '_' + anoFinal
+);
+
+exportar(
+  P99,
+  '06_P99_' +
+  anoInicial + '_' + anoFinal
+);
+
+
+// ============================================================================
+// 16. EXPORTAR MAPAS MENSAIS
+// ============================================================================
+
+for (var j = 1; j <= 12; j++) {
+
+  var mensal = ee.Image(
+    RegimeMensal
+      .filter(ee.Filter.eq('mes', j))
+      .first()
+  );
+
+  exportar(
+    mensal,
+    '02_' +
+    ('0' + j).slice(-2) +
+    '_Precipitacao_' +
+    nomesMeses[j - 1] +
+    '_' +
+    anoInicial +
+    '_' +
+    anoFinal
+  );
+
+}
+
+
+// ============================================================================
+// 17. EXPORTAR DIAS COM CHUVA ≥ LIMIARES
+// ============================================================================
+
+for (var k = 0; k < limiaresChuva.length; k++) {
+
+  var limite = limiaresChuva[k];
+
+  exportar(
+    imagensDiasChuva[k],
+    '07_Dias_Chuva_GE_' +
+    limite +
+    'mm_' +
+    anoInicial +
+    '_' +
+    anoFinal
+  );
+
+}
+
+
+// ============================================================================
+// 18. EXPORTAR DIAS > 50 mm
+// ============================================================================
+
+exportar(
+  diasChuvaMais50,
+  '07_Dias_Chuva_Maior_50mm_' +
+  anoInicial +
+  '_' +
+  anoFinal
+);
+
+
+// ============================================================================
+// 19. ESTATÍSTICA DESCRITIVA ESPACIAL
+// ============================================================================
+
+function calcularEstatisticas(imagem, nome, unidade) {
+
+  imagem = ee.Image(imagem);
+
+  var banda = ee.String(
+    imagem.bandNames().get(0)
+  );
+
+  var resultado = imagem.reduceRegion({
+
+    reducer: ee.Reducer.minMax()
+      .combine({
+        reducer2: ee.Reducer.mean(),
+        sharedInputs: true
+      })
+      .combine({
+        reducer2: ee.Reducer.stdDev(),
+        sharedInputs: true
+      }),
+
+    geometry: roi,
+
+    scale: escala,
+
+    maxPixels: 1e13,
+
+    bestEffort: true
+
+  });
+
+  var minimo = ee.Number(
+    resultado.get(banda.cat('_min'))
+  );
+
+  var maximo = ee.Number(
+    resultado.get(banda.cat('_max'))
+  );
+
+  var media = ee.Number(
+    resultado.get(banda.cat('_mean'))
+  );
+
+  var desvioPadrao = ee.Number(
+    resultado.get(banda.cat('_stdDev'))
+  );
+
+  var cv = ee.Number(
+    ee.Algorithms.If(
+      media.neq(0),
+      desvioPadrao.divide(media).multiply(100),
+      0
+    )
+  );
+
+  return ee.Feature(null, {
+
+    'Periodo': nome,
+
+    'Unidade': unidade,
+
+    'Minimo': minimo,
+
+    'Maximo': maximo,
+
+    'Media': media,
+
+    'DesvioPadrao': desvioPadrao,
+
+    'CV': cv
+
+  });
+
+}
+
+
+// ============================================================================
+// 20. ESTATÍSTICA DA SÉRIE HISTÓRICA
+// ============================================================================
+
+var estatisticaAnual = calcularEstatisticas(
+  precipitacaoTotalMediaAnual,
+  'Série histórica',
+  'mm/ano'
+);
+
+
+// ============================================================================
+// 21. ESTATÍSTICAS MENSAIS
+// ============================================================================
+
+var listaEstatisticasMensais = [];
+
+for (var m = 1; m <= 12; m++) {
+
+  var imagemMensal = ee.Image(
+    RegimeMensal
+      .filter(ee.Filter.eq('mes', m))
+      .first()
+  );
+
+  var estatisticaMensal = calcularEstatisticas(
+    imagemMensal,
+    nomesMeses[m - 1],
+    'mm/mês'
+  );
+
+  listaEstatisticasMensais.push(
+    estatisticaMensal
+  );
+
+}
+
+
+// ============================================================================
+// 22. TABELA FINAL
+// ============================================================================
+
+var tabelaEstatisticas = ee.FeatureCollection(
+  [estatisticaAnual].concat(
+    listaEstatisticasMensais
+  )
+);
+
+print('====================================================');
+
+print('ESTATÍSTICA DESCRITIVA DA PRECIPITAÇÃO');
+
+print(
+  'Período analisado: ' +
+  anoInicial +
+  '–' +
+  anoFinal
+);
+
+print(
+  'Número de anos: ' +
+  numeroAnos
+);
+
+print('====================================================');
+
+print(
+  'Tabela com 13 resultados:',
+  tabelaEstatisticas
+);
+
+print('====================================================');
+
+print(
+  'Colunas: Mínimo | Máximo | Média | Desvio Padrão | CV (%)'
+);
+
+print('====================================================');
+
+
+// ============================================================================
+// 23. TABELA VISUAL
+// ============================================================================
+
+var tabelaConsole = ui.Chart.feature.byFeature(
+  tabelaEstatisticas,
+  'Periodo',
+  [
+    'Minimo',
+    'Maximo',
+    'Media',
+    'DesvioPadrao',
+    'CV'
+  ]
+)
+.setChartType('Table')
+.setOptions({
+  title: 'Estatística descritiva da precipitação'
+});
+
+print(tabelaConsole);
+
+
+// ============================================================================
+// FINAL
+// ============================================================================
+
+print('====================================================');
+print('ATLAS PLUVIOMÉTRICO FINALIZADO');
+print('Produtos cartográficos:');
+print('01 - Precipitação total média anual');
+print('02 - Precipitação total mensal média (12 mapas)');
+print('03 - Desvio padrão anual');
+print('04 - Coeficiente de Variação');
+print('05 - Percentil 95');
+print('06 - Percentil 99');
+print('07 - Número médio anual de dias com precipitação');
+print('Tabela estatística: Série histórica + 12 meses');
+print('====================================================');
