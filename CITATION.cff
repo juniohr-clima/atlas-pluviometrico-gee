@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: "Atlas Pluviométrico no Google Earth Engine"
+message: "Se você utilizar este repositório, por favor cite este trabalho."
+type: software
+authors:
+  - family-names: "Nascimento Júnior"
+    given-names: "Lindberg"
+repository-code: "https://github.com/SEUUSUARIO/atlas-pluviometrico-gee"
+license: "CC-BY-4.0"
