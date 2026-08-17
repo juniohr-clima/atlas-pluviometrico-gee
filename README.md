@@ -11,4 +11,4 @@ coeficiente de variação;
 percentil 95;
 percentil 99;
 número de dias com precipitação ≥ 1, 5, 10, 20, 30, 40 e 50 mm;
-outros produtos derivados.
+Tabela com estatistica descritiva
